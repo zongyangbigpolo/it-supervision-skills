@@ -75,6 +75,9 @@ case "$1" in
   *)         usage ;;
 esac
 
-if ! python3 -c "import docx" 2>/dev/null; then
-  echo "提示：渲染 DOCX 需要 python-docx，请执行：python3 -m pip install python-docx"
+if ! python3 -c "import docx, PIL" 2>/dev/null; then
+  echo "提示：渲染 DOCX 与处理照片需要：python3 -m pip install python-docx pillow"
+fi
+if ! python3 -c "import rapidocr" 2>/dev/null && ! python3 -c "import rapidocr_onnxruntime" 2>/dev/null; then
+  echo "可选：识别照片水印需要：python3 -m pip install rapidocr onnxruntime"
 fi

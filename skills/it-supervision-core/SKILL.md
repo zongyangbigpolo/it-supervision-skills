@@ -30,6 +30,7 @@ metadata:
 | 阶段验收、里程碑验收、初验、终验、试运行、上线验收、软件测试验收 | `stage-acceptance` | 《阶段验收监理意见》《验收报告》《遗留问题清单》 |
 | 等保、等级保护、等保测评、定级备案、安全整改、密评 | `mlps-check` | 《等保测评监理检查表》《等保整改跟踪表》 |
 | 到货验收、开箱验收、设备清点、硬件清单、加电检查 | `hardware-arrival-check` | 《硬件设备到货验收单》《到货验收清单（CSV/XLSX 可导）》 |
+| 贴照片、配图、现场照片、水印照片、按序列号插图 | `site-photos` | 照片匹配表/报告 + 带图 Word（任一文书均可） |
 
 用户只说“帮我出一份监理资料”而未说明类型时，用 `ask_user`（或等价的提问方式）让用户在上表中选择，不要自行猜测。
 
@@ -63,6 +64,7 @@ metadata:
 ├── 04-阶段验收/
 ├── 05-等保测评检查/
 ├── 06-到货验收/
+├── 照片匹配/        # 照片匹配表.csv、照片匹配报告.md、OCR 缓存
 └── 正式件/          # 渲染后的 DOCX，供打印签章
 ```
 
@@ -81,6 +83,9 @@ python3 "${CORE_DIR}/scripts/validate_doc.py" 监理资料/03-监理通知单/xx
 
 # 3) 渲染为可打印签章的 DOCX（A4、宋体/仿宋、页眉页脚、表格边框）
 python3 "${CORE_DIR}/scripts/md_to_docx.py" 监理资料/03-监理通知单/xxx.md -o 监理资料/正式件/
+
+# 4) 带现场照片渲染：文书中写 {{照片:序列号}} 照片位，匹配表由 site-photos skill 生成
+python3 "${CORE_DIR}/scripts/md_to_docx.py" xxx.md --photos 监理资料/照片匹配/照片匹配表.csv -o 监理资料/正式件/
 ```
 
 无法运行 Python 时，直接交付 Markdown，并提示用户用 WPS/Word 打开或用 pandoc 转换。

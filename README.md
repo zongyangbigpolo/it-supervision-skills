@@ -15,6 +15,7 @@
 | `stage-acceptance` | 里程碑/初验/终验 | 《阶段验收监理意见》+ 遗留问题清单 |
 | `mlps-check` | 等保 2.0 全过程监理检查 | 《等保测评监理检查表》《等保整改跟踪表》 |
 | `hardware-arrival-check` | 开箱验收 + 清单自动比对 | 《硬件设备到货验收单》+ 序列号明细 + 差异报告 |
+| `site-photos` | 一句话把现场照片贴进文书 | 按文件名 / 水印（本地 OCR）/ 拍摄日期匹配到每台设备或问题条目，出匹配报告后生成带图 Word |
 
 ### 三控两管一协调如何落到文书
 
@@ -52,7 +53,8 @@ cd it-supervision-skills
 ./install.sh project ~/我的监理项目   # 项目级安装
 ./install.sh path <任意目录>          # 其他 Agent
 # 加 --link 使用软链接，git pull 即可更新
-python3 -m pip install python-docx    # DOCX 渲染依赖（可选 openpyxl 读 xlsx）
+python3 -m pip install python-docx pillow             # DOCX 渲染、照片处理（可选 openpyxl 读 xlsx）
+python3 -m pip install rapidocr onnxruntime           # 可选：照片水印识别（本地运行，照片不上传）
 ```
 
 > 各 Agent 的 skills 目录可能随版本调整，请以对应工具文档为准；若目录不同，用 `./install.sh path <目录>`。
@@ -70,7 +72,7 @@ python3 -m pip install python-docx    # DOCX 渲染依赖（可选 openpyxl 读 
 ./install.sh zip   # 生成 dist/it-supervision-skills.zip 及每个 skill 的独立 zip
 ```
 
-在 Agent 的“技能/Skills”管理页面上传 zip。**6 个子 skill 都依赖 `it-supervision-core`，请一并导入。**
+在 Agent 的“技能/Skills”管理页面上传 zip。**所有子 skill 都依赖 `it-supervision-core`，请一并导入。**
 
 ## 使用示例
 
@@ -84,7 +86,22 @@ python3 -m pip install python-docx    # DOCX 渲染依赖（可选 openpyxl 读 
 - “这是等保测评报告，帮我出等保测评监理检查表，看能不能进入初验。”
 - “准备初验，帮我列验收资料清单并起草验收监理意见。”
 
+- “把 D:/现场照片 里的 150 张照片按水印里的序列号贴到到货验收单每台设备那一行。”
+
 完整示例见 [examples/](examples/)。
+
+### 现场照片自动配图
+
+```mermaid
+flowchart LR
+  A[照片文件夹<br>文件名/子文件夹/水印/EXIF] --> B[photo_match.py<br>本地 OCR 识别水印]
+  D[文书 Markdown<br>含 照片 占位符] --> B
+  B --> C[照片匹配表.csv<br>+ 匹配报告]
+  C -->|人工确认/修改| E[md_to_docx.py --photos]
+  E --> F[带图 Word<br>每台设备一行配图]
+```
+
+实测：100 台设备、150 张照片（文件名只有“服务器_日期”，序列号只在水印里）用约 1 分钟完成识别，100 台设备全部配上照片，134 张设备照片全部贴对，16 张机房全景照列为“未匹配”。照片规范见 [照片位与命名规范](skills/site-photos/references/照片位与命名规范.md)。
 
 ### 命令行脚本
 
@@ -104,6 +121,7 @@ python3 skills/hardware-arrival-check/scripts/compare_delivery.py 合同.csv 到
 ├── 项目档案.yaml   ├── 编号台账.csv
 ├── 01-监理规划/    ├── 02-监理日志/    ├── 03-监理通知单/
 ├── 04-阶段验收/    ├── 05-等保测评检查/ ├── 06-到货验收/
+├── 照片匹配/        # 照片匹配表.csv、照片匹配报告.md
 └── 正式件/          # DOCX，打印后签字盖章
 ```
 

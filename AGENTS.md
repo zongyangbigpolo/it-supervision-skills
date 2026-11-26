@@ -20,7 +20,8 @@ skills/
 ├── supervision-notice/       # 监理通知单 / 回复单 / 暂停令 / 复工令 / 联系单
 ├── stage-acceptance/         # 阶段验收 / 初验 / 终验
 ├── mlps-check/               # 等保测评监理检查
-└── hardware-arrival-check/   # 硬件到货验收 + 清单自动比对
+├── hardware-arrival-check/   # 硬件到货验收 + 清单自动比对
+└── site-photos/              # 现场照片按文件名/水印/日期自动匹配并插入文书
 ```
 
 ## 开发约定（修改本仓库时）

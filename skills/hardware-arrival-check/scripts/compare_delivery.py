@@ -3,6 +3,7 @@
 
 用法：
   python3 compare_delivery.py 合同设备清单.csv 本批到货清单.csv [--previous 第1批.csv ...] [-o 比对结果.md]
+                              [--detail] [--photo-slots]   # 附设备序列号明细表；--photo-slots 加“现场照片”列
 
 合同清单列：合同项号, 设备名称, 品牌, 型号, 主要配置, 单位, 数量, 单价
 到货清单列：序号, 合同项号, 设备名称, 品牌, 型号, 序列号, 外观, 加电, 备注（每台一行）
@@ -71,6 +72,8 @@ def main() -> int:
     ap.add_argument("delivery")
     ap.add_argument("--previous", nargs="*", default=[], help="此前批次到货清单（计算累计）")
     ap.add_argument("-o", "--output")
+    ap.add_argument("--detail", action="store_true", help="附“设备序列号明细”表")
+    ap.add_argument("--photo-slots", action="store_true", help="明细表加“现场照片”列（{{照片:序列号}} 占位符，供 photo_match.py 配图）")
     args = ap.parse_args()
 
     contract = load_rows(Path(args.contract))
@@ -154,6 +157,19 @@ def main() -> int:
     section("四、缺少序列号", ["到货序号", "合同项号", "设备名称"], no_sn)
     section("五、合同外设备（无法匹配合同项）", ["到货序号", "设备名称", "品牌", "型号", "序列号"], extras)
     section("六、外观/加电异常", ["到货序号", "合同项号", "序列号", "检查项", "结果", "备注"], bad_state)
+
+    if args.detail or args.photo_slots:
+        header = ["序号", "合同项号", "设备名称", "品牌", "型号", "序列号（SN）", "外观", "加电", "备注"]
+        detail = []
+        for idx, r in enumerate(current, 1):
+            row = [r.get("序号") or str(idx), item_of(r) or "合同外", r.get("设备名称", ""), r.get("品牌", ""),
+                   r.get("型号", ""), r.get("序列号", "") or "【待填】", r.get("外观", ""), r.get("加电", ""), r.get("备注", "")]
+            if args.photo_slots:
+                row.append("{{照片:" + r["序列号"].strip() + "}}" if r.get("序列号") else "")
+            detail.append(row)
+        if args.photo_slots:
+            header.append("现场照片")
+        section("附件：设备序列号明细", header, detail)
 
     issues = len(mismatches) + len(dup_sn) + len(no_sn) + len(extras) + len(bad_state) + len(over)
     parts.append(f"> 自动比对发现问题 {issues} 项（累计超合同数量 {len(over)} 项）。比对仅基于清单数据，"

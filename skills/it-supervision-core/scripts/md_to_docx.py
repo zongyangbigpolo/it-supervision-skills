@@ -7,6 +7,7 @@
 
 用法：
   python3 md_to_docx.py 文书.md [-o 输出目录或文件.docx] [--header "页眉文字"] [--profile 监理资料/项目档案.yaml]
+                        [--photos 照片匹配表.csv]   # 把 {{照片:关键字}} 占位符替换为实拍照片
 依赖：python-docx（pip install python-docx）
 """
 from __future__ import annotations
@@ -29,6 +30,10 @@ except ImportError:  # pragma: no cover
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import read_profile_scalar  # noqa: E402
+from photos import PHOTO_RE, find_placeholders, fit_size, load_photo_map, prepare_image, strip_placeholders  # noqa: E402
+
+PHOTO_MAP: dict[str, list[tuple[Path, str]]] = {}
+PHOTO_MISSING: list[str] = []
 
 FONT_SETS = {
     "win": {"body": "仿宋", "title": "宋体", "head": "黑体", "quote": "楷体"},
@@ -157,6 +162,75 @@ def display_len(text: str) -> int:
     return max(2, longest)
 
 
+def photos_for(keys: list[str]) -> list[tuple[Path, str]]:
+    found, seen = [], set()
+    for key in keys:
+        items = [(p, c) for p, c in PHOTO_MAP.get(key, []) if p.exists()]
+        if not items:
+            PHOTO_MISSING.append(key)
+        for p, c in items:
+            if (key, p) not in seen:
+                seen.add((key, p))
+                found.append((p, c))
+    return found
+
+
+def missing_note(container, keys: list[str], size: float) -> None:
+    p = container.add_paragraph()
+    add_inline(p, "【待补照片：" + "、".join(keys) + "】", FONT_BODY, size)
+    fmt(p, align=WD_ALIGN_PARAGRAPH.CENTER, line_spacing=1.0)
+
+
+def add_picture_block(container, path: Path, caption: str, max_w: float, max_h: float, cap_size: float) -> None:
+    try:
+        src, aspect = prepare_image(path)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[警告] 无法读取图片 {path}：{exc}", file=sys.stderr)
+        return
+    w, h = fit_size(aspect, max_w, max_h)
+    p = container.add_paragraph()
+    p.add_run().add_picture(src, width=Cm(w), height=Cm(h) if h else None)
+    fmt(p, align=WD_ALIGN_PARAGRAPH.CENTER, line_spacing=1.0, keep_next=bool(caption))
+    if caption:
+        cp = container.add_paragraph()
+        add_inline(cp, caption, FONT_BODY, cap_size)
+        fmt(cp, align=WD_ALIGN_PARAGRAPH.CENTER, line_spacing=1.0, space_after=4)
+
+
+def add_photo_grid(doc, keys: list[str], usable_cm: float) -> None:
+    """正文中的照片：每行 2 张（仅 1 张时居中放大），图注在下。"""
+    items = photos_for(keys)
+    if not items:
+        missing_note(doc, keys, 10.5)
+        return
+    cols = 1 if len(items) == 1 else 2
+    max_w = (usable_cm - 0.6) / cols if cols == 2 else min(12.0, usable_cm)
+    max_h = 6.5 if cols == 2 else 9.0
+    grid = doc.add_table(rows=(len(items) + cols - 1) // cols, cols=cols)
+    grid.alignment = WD_TABLE_ALIGNMENT.CENTER
+    set_col_widths(grid, [Cm(usable_cm / cols)] * cols)
+    for idx, (path, caption) in enumerate(items):
+        row = grid.rows[idx // cols]
+        row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
+        cell = row.cells[idx % cols]
+        cell.width = Cm(usable_cm / cols)
+        add_picture_block(cell, path, caption, max_w, max_h, 9)
+        first = cell.paragraphs[0]
+        if not first.text and not first.runs:
+            first._element.getparent().remove(first._element)
+
+
+def set_col_widths(table, widths) -> None:
+    """写入 tblGrid 并关闭自动调整，Word/WPS/LibreOffice 才会按指定列宽排版。"""
+    table.autofit = False
+    tbl_pr = table._tbl.tblPr
+    layout = OxmlElement("w:tblLayout")
+    layout.set(qn("w:type"), "fixed")
+    tbl_pr.append(layout)
+    for col, w in zip(table.columns, widths):
+        col.width = w
+
+
 def add_table(doc, rows: list[list[str]], signature: bool, usable_cm: float) -> None:
     ncols = max(len(r) for r in rows)
     rows = [r + [""] * (ncols - len(r)) for r in rows]
@@ -166,14 +240,24 @@ def add_table(doc, rows: list[list[str]], signature: bool, usable_cm: float) -> 
 
     # 表头信息表（首格为“文书编号”等）：不设表头行，标签列加粗
     form = rows[0][0].strip("* ") in FORM_FIRST_CELLS and ncols in (2, 4, 6)
-    weights = [min(30, max(display_len(r[i]) for r in rows)) for i in range(ncols)]
-    total = sum(weights)
-    widths = [Cm(max(1.2, usable_cm * w / total)) for w in weights]
+    def weight(text: str) -> int:
+        if find_placeholders(text):
+            return max(12, display_len(strip_placeholders(text)))
+        return display_len(text)
+
+    weights = [min(30, max(weight(r[i]) for r in rows)) for i in range(ncols)]
+    photo_cols = {i for i in range(ncols) if any(find_placeholders(r[i]) for r in rows[1:])}
+    photo_w = min(6.0, max(4.0, usable_cm * 0.3)) if photo_cols else 0
+    rest_cm = usable_cm - photo_w * len(photo_cols)
+    total = sum(w for i, w in enumerate(weights) if i not in photo_cols) or 1
+    widths = [Cm(photo_w) if i in photo_cols else Cm(max(1.0, rest_cm * w / total)) for i, w in enumerate(weights)]
+
+    set_col_widths(table, widths)
 
     for ri, row in enumerate(rows):
         tr = table.rows[ri]
         tr_pr = tr._tr.get_or_add_trPr()
-        if signature or ri == 0 or form:
+        if signature or ri == 0 or form or any(find_placeholders(c) for c in row):
             tr_pr.append(OxmlElement("w:cantSplit"))
         if ri == 0 and not form:
             tr_pr.append(OxmlElement("w:tblHeader"))
@@ -183,8 +267,18 @@ def add_table(doc, rows: list[list[str]], signature: bool, usable_cm: float) -> 
             p = cell.paragraphs[0]
             bold = (ci % 2 == 0) if form else ri == 0
             align = WD_ALIGN_PARAGRAPH.CENTER if (ri == 0 and not form) else None
-            add_inline(p, text, FONT_BODY, 10.5, bold)
+            keys = find_placeholders(text)
+            add_inline(p, strip_placeholders(text) if keys else text, FONT_BODY, 10.5, bold)
             fmt(p, align=align, line_spacing=1.25, keep_next=signature)
+            if keys:
+                items = photos_for(keys)
+                if not items:
+                    missing_note(cell, keys, 9)
+                cell_w = widths[ci] / 360000 - 0.3
+                for path, caption in items:
+                    add_picture_block(cell, path, caption, cell_w, 4.0, 8)
+                if not p.text:
+                    p._element.getparent().remove(p._element)
 
 
 def convert(md_path: Path, out_path: Path, header: str | None, landscape: bool) -> Path:
@@ -195,7 +289,11 @@ def convert(md_path: Path, out_path: Path, header: str | None, landscape: bool) 
 
     i, title_done, pending_signature, in_code = 0, False, False, False
     last_para = None
+    pending_photos: list[str] = []
     while i < len(lines):
+        if pending_photos:
+            add_photo_grid(doc, pending_photos, usable_cm)
+            pending_photos = []
         line = lines[i]
         stripped = line.strip()
 
@@ -244,6 +342,17 @@ def convert(md_path: Path, out_path: Path, header: str | None, landscape: bool) 
             last_para = spacer
             continue
 
+        line_keys = find_placeholders(stripped)
+        if line_keys and not stripped.startswith("|"):
+            rest = strip_placeholders(stripped)
+            if not re.sub(r"^([-*+]|\d+[.、)]|>)\s*", "", rest).strip("*：: "):
+                add_photo_grid(doc, line_keys, usable_cm)
+                i += 1
+                continue
+            line = PHOTO_RE.sub("", line).rstrip()
+            stripped = line.strip()
+            pending_photos = line_keys
+
         h = re.match(r"^(#{1,6})\s+(.*)$", stripped)
         if h:
             level, text = len(h.group(1)), h.group(2).strip()
@@ -291,13 +400,16 @@ def convert(md_path: Path, out_path: Path, header: str | None, landscape: bool) 
         buf = [stripped]
         i += 1
         while i < len(lines) and lines[i].strip() and not re.match(r"^(#|\||>|```|<!--|\s*([-*+]|\d+[.、)])\s)", lines[i].strip()):
-            buf.append(lines[i].strip())
+            pending_photos += find_placeholders(lines[i])
+            buf.append(strip_placeholders(lines[i]))
             i += 1
         p = doc.add_paragraph()
         add_inline(p, "".join(buf), FONT_BODY, 12)
         fmt(p, first_indent=True)
         last_para = p
 
+    if pending_photos:
+        add_photo_grid(doc, pending_photos, usable_cm)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(out_path)
     return out_path
@@ -312,7 +424,11 @@ def main() -> int:
     ap.add_argument("--landscape", action="store_true", help="横向页面（宽表格清单适用）")
     ap.add_argument("--fonts", choices=sorted(FONT_SETS), default="win",
                     help="字体方案：win=仿宋/宋体/黑体（Windows/WPS，默认）；mac=macOS 自带中文字体")
+    ap.add_argument("--photos", help="照片匹配表 CSV（photo_match.py 生成并经人工确认），用于替换 {{照片:…}} 占位符")
     args = ap.parse_args()
+
+    if args.photos:
+        PHOTO_MAP.update(load_photo_map(Path(args.photos)))
 
     global FONT_BODY, FONT_TITLE, FONT_HEAD, FONT_QUOTE
     fs = FONT_SETS[args.fonts]
@@ -337,7 +453,11 @@ def main() -> int:
         else:
             out = src.with_suffix(".docx")
         landscape = args.landscape or "<!-- landscape -->" in src.read_text(encoding="utf-8")
+        PHOTO_MISSING.clear()
         print(f"已生成：{convert(src, out, header, landscape)}")
+        if PHOTO_MISSING:
+            uniq = list(dict.fromkeys(PHOTO_MISSING))
+            print(f"[警告] {len(uniq)} 个照片位没有照片（已标“【待补照片】”）：{'、'.join(uniq[:20])}{' …' if len(uniq) > 20 else ''}")
     return 0
 
 

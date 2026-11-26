@@ -114,6 +114,59 @@ class ExampleTest(unittest.TestCase):
             self.assertRegex(r.stdout, r"SN-A0001 \| 1")
 
 
+class PhotoTest(unittest.TestCase):
+    MATCH = ROOT / "skills" / "site-photos" / "scripts" / "photo_match.py"
+
+    def setUp(self):
+        from PIL import Image
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        photos = self.dir / "照片" / "SN-B0002"
+        photos.mkdir(parents=True)
+        for name, folder in [("SN-A0001_铭牌.jpg", None), ("服务器_20261120.jpg", None), ("服务器_20261120(1).jpg", None),
+                             ("机房全景_20261121.jpg", None), ("加电.jpg", photos)]:
+            Image.new("RGB", (40, 30), (120, 120, 120)).save((folder or photos.parent) / name)
+        (self.dir / "识别.csv").write_text("照片文件,文字\n服务器_20261120.jpg,2026-11-20 10:01 SN:SN-AOOO3 加电\n",
+                                         encoding="utf-8")
+        self.doc = self.dir / "单.md"
+        self.doc.write_text(
+            "# 到货验收单\n\n| 序号 | 序列号 | 现场照片 |\n|---|---|---|\n"
+            "| 1 | SN-A0001 | {{照片:SN-A0001}} |\n| 2 | SN-B0002 | {{照片:SN-B0002}} |\n"
+            "| 3 | SN-A0003 | {{照片:SN-A0003}} |\n| 4 | SN-C0004 | {{照片:SN-C0004}} |\n\n"
+            "- **现场照片：** {{照片:日期=2026-11-21&机房}}\n", encoding="utf-8")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_match_and_render(self):
+        out = self.dir / "匹配"
+        r = run(self.MATCH, self.dir / "照片", "--doc", self.doc, "-o", out, "--ocr", "none",
+                "--extra-text", self.dir / "识别.csv")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        with (out / "照片匹配表.csv").open(encoding="utf-8-sig") as f:
+            rows = {(x["占位符"], x["照片文件"]): x for x in csv.DictReader(f)}
+        self.assertEqual(rows[("SN-A0001", "SN-A0001_铭牌.jpg")]["置信度"], "高")
+        self.assertIn(("SN-B0002", "SN-B0002/加电.jpg"), rows)
+        self.assertEqual(rows[("SN-A0003", "服务器_20261120.jpg")]["置信度"], "中")  # OCR 把 0 认成 O
+        self.assertIn(("日期=2026-11-21&机房", "机房全景_20261121.jpg"), rows)
+        self.assertFalse(any(k[0] == "SN-C0004" for k in rows))
+        report = (out / "照片匹配报告.md").read_text(encoding="utf-8")
+        self.assertIn("SN-C0004", report)
+        self.assertIn("服务器_20261120(1).jpg", report)
+
+        r = run(CORE / "md_to_docx.py", self.doc, "--photos", out / "照片匹配表.csv", "-o", self.dir, "--header", "测试")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("SN-C0004", r.stdout)
+        from docx import Document
+
+        d = Document(self.dir / "单.docx")
+        self.assertEqual(len(d.inline_shapes), 4)
+        cell_pics = [len(row.cells[2]._tc.xpath(".//pic:pic")) for row in d.tables[0].rows[1:]]
+        self.assertEqual(cell_pics, [1, 1, 1, 0])
+        self.assertIn("【待补照片：SN-C0004】", d.tables[0].rows[4].cells[2].text)
+
+
 class SkillMetadataTest(unittest.TestCase):
     def test_frontmatter_and_links(self):
         for skill in sorted((ROOT / "skills").iterdir()):
