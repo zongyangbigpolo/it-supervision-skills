@@ -1,0 +1,13 @@
+{
+  "name": "it-supervision-skills",
+  "owner": {
+    "name": "zongyangbigpolo"
+  },
+  "plugins": [
+    {
+      "name": "it-supervision-skills",
+      "source": "./",
+      "description": "信息技术服务监理文书 skill 套件（GB/T 19668 三控两管一协调）"
+    }
+  ]
+}

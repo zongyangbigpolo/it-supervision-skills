@@ -1,0 +1,12 @@
+{
+  "name": "it-supervision-skills",
+  "description": "信息技术服务监理（GB/T 19668，三控两管一协调）文书 skill 套件：监理规划、监理日志、监理通知单、阶段验收、等保测评检查、硬件到货验收。",
+  "version": "1.0.0",
+  "author": {
+    "name": "zongyangbigpolo"
+  },
+  "homepage": "https://github.com/zongyangbigpolo/it-supervision-skills",
+  "repository": "https://github.com/zongyangbigpolo/it-supervision-skills",
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "keywords": ["信息监理", "GB/T 19668", "三控两管一协调", "等保", "到货验收", "监理日志", "监理通知单"]
+}
